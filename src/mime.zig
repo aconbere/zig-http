@@ -1,7 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 
-const ParserError = enum {
+const ParserError = error{
     InvalidInput,
 };
 
@@ -20,20 +20,18 @@ const Headers = struct {
 
     fn deinit(self: *Self) void {
         var it = self.store.iterator();
-
         while (it.next()) |entry| {
+            // this is where I would expect to free entry.key
+            // and the values in the array list at entry.value
             entry.value.deinit();
-            _ = self.store.remove(entry.key);
         }
-
         self.store.deinit();
         self.* = undefined;
     }
 
     fn parse(allocator: *mem.Allocator, reader: anytype) !Self {
-        var buf: [100]u8 = undefined;
-
         var h = Headers.init(allocator);
+        var buf: [100]u8 = undefined;
 
         while (try reader.readUntilDelimiterOrEof(buf[0..], '\n')) |line| {
             if (mem.indexOf(u8, line, ":")) |i| {
@@ -95,14 +93,11 @@ test "Headers.parse" {
     var fbs = std.io.fixedBufferStream(buf);
 
     var h = try Headers.parse(test_allocator, fbs.reader());
-    const l = h.get("test").?;
-
-    std.debug.print("v: {s}\n", .{l.items[0]});
-    std.debug.print("v: {s}\n", .{l.items[1]});
-    std.debug.print("len: {}\n", .{l.items.len});
-
-    testing.expectEqualSlices([]const u8, l.items, &[_][]const u8{ "val1", "val2" });
     defer h.deinit();
+
+    var l = h.get("test").?;
+    testing.expectEqualSlices(u8, l.pop(), "val2");
+    testing.expectEqualSlices(u8, l.pop(), "val1");
 }
 
 test "Header.add " {
@@ -115,8 +110,9 @@ test "Header.add " {
     try h.add("test", "val1");
     try h.add("test", "val2");
 
-    const l = h.get("test").?;
-    testing.expectEqualSlices([]const u8, l.items, &[_][]const u8{ "val1", "val2" });
+    var l = h.get("test").?;
+    testing.expectEqualSlices(u8, l.pop(), "val2");
+    testing.expectEqualSlices(u8, l.pop(), "val1");
 }
 
 test "Header.format " {
