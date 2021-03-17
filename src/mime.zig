@@ -1,6 +1,10 @@
 const std = @import("std");
 const mem = std.mem;
 
+const ParserError = enum {
+    InvalidInput,
+};
+
 const Headers = struct {
     store: std.StringHashMap(std.ArrayList([]const u8)),
     allocator: *mem.Allocator,
@@ -26,6 +30,22 @@ const Headers = struct {
         self.* = undefined;
     }
 
+    fn parse(allocator: *mem.Allocator, reader: anytype) !Self {
+        var buf: [100]u8 = undefined;
+
+        var h = Headers.init(allocator);
+
+        while (try reader.readUntilDelimiterOrEof(buf[0..], '\n')) |line| {
+            if (mem.indexOf(u8, line, ":")) |i| {
+                const key = try mem.dupe(allocator, u8, line[0..i]);
+                const value = try mem.dupe(allocator, u8, line[i + 1 ..]);
+                try h.add(key, value);
+            }
+        }
+
+        return h;
+    }
+
     pub fn format(
         self: Self,
         comptime fmt: []const u8,
@@ -47,10 +67,10 @@ const Headers = struct {
         try self.store.put(key, l);
     }
 
-    pub fn set(self: *Self, key: []const u8, value: []const u8) void {
-        const l = std.ArrayList([]const u8).init(self.allocator);
-        l.append(value);
-        self.store.put(key, a);
+    pub fn set(self: *Self, key: []const u8, value: []const u8) !void {
+        var l = std.ArrayList([]const u8).init(self.allocator);
+        try l.append(value);
+        try self.store.put(key, l);
     }
 
     pub fn get(self: *Self, key: []const u8) ?std.ArrayList([]const u8) {
@@ -61,6 +81,29 @@ const Headers = struct {
         const val = self.store.contains(key);
     }
 };
+
+test "Headers.parse" {
+    const testing = std.testing;
+    const test_allocator = testing.allocator;
+
+    const buf =
+        \\test:val1
+        \\test:val2
+        \\test2:val3
+    ;
+
+    var fbs = std.io.fixedBufferStream(buf);
+
+    var h = try Headers.parse(test_allocator, fbs.reader());
+    const l = h.get("test").?;
+
+    std.debug.print("v: {s}\n", .{l.items[0]});
+    std.debug.print("v: {s}\n", .{l.items[1]});
+    std.debug.print("len: {}\n", .{l.items.len});
+
+    testing.expectEqualSlices([]const u8, l.items, &[_][]const u8{ "val1", "val2" });
+    defer h.deinit();
+}
 
 test "Header.add " {
     const testing = std.testing;
